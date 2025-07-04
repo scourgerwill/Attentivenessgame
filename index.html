@@ -1,157 +1,130 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <meta charset="UTF-8">
-<title>持續專注力測試‧2 秒切換 + A/S/D 快捷鍵 + 進入動畫</title>
+<title>持續專注力測試‧可自訂切換間隔</title>
 <style>
-  body { margin: 0; font-family: sans-serif; background: #f0f8ff; text-align: center; }
-  canvas { display: block; margin: 0 auto; background: #f0f8ff; }
-  button {
-    width: 160px; height: 48px; margin: 8px; border: 0; border-radius: 8px;
-    background: #b0c4de; color: #fff; font-size: 18px; cursor: pointer;
-  }
-  button:hover { background: #778899; }
-  button.flash { animation: flashBtn 150ms ease-out; }
-  @keyframes flashBtn { from { transform: scale(1.05); } to { transform: scale(1); } }
+  body{margin:0;font-family:sans-serif;background:#f0f8ff;text-align:center}
+  canvas{display:block;margin:0 auto;background:#f0f8ff}
+  button{width:160px;height:48px;margin:8px;border:0;border-radius:8px;background:#b0c4de;color:#fff;font-size:18px;cursor:pointer}
+  button:hover{background:#778899}
 </style>
 
 <canvas id="game" width="800" height="480"></canvas>
 <div>
   <span id="score">分數: 0</span>&emsp;<span id="timer">時間: 03:00</span><br><br>
-  <button data-type="digit">數字相同 (A)</button>
-  <button data-type="both">兩者皆相同 (S)</button>
-  <button data-type="icon">Icon 相同 (D)</button>
+  <!-- A / S / D 對應三顆按鈕，順序：數字相同、兩者皆相同、Icon 相同 -->
+  <button data-type="digit">A：數字相同</button>
+  <button data-type="both">S：兩者皆相同</button>
+  <button data-type="icon">D：Icon 相同</button>
 </div>
 
 <script>
-/**** 全局設定 ****/
-const canvas = document.getElementById('game');
-const ctx    = canvas.getContext('2d');
-const ICON_SIZE = 160;
-const GAME_DURATION = 180; // 秒
-const SWITCH_INTERVAL = 1500; // 毫秒 -> 2 秒
+/***** 參數設定 *****/
+const ICON_SIZE       = 160;     // 圖示尺寸
+const GAME_DURATION   = 180;     // 遊戲秒數
+const SWITCH_INTERVAL = 1500;    // 每題顯示時間（毫秒），改這裡即可 1000=1 秒、2000=2 秒...
+const FLASH_MS        = 120;     // 每題切換時的白色閃光持續時間
 
-/**** 產生 5 個彩色佔位圖示 ****/
-const icons = {}, colors = ['#ff5252','#4caf50','#2196f3','#ffeb3b','#e040fb'];
+/***** 畫布 & 基本變數 *****/
+const canvas=document.getElementById('game');
+const ctx=canvas.getContext('2d');
+let score=0,startTime=Date.now(),lastSwitch=Date.now(),flashUntil=0,playerAnswered=false;
+
+/***** 動態產生 5 個彩色方塊作為圖示 *****/
+const icons={},colors=['#ff5252','#4caf50','#2196f3','#ffeb3b','#e040fb'];
 colors.forEach((c,i)=>{
-  const s=document.createElement('canvas'); s.width=s.height=ICON_SIZE;
-  const g=s.getContext('2d');
-  g.fillStyle=c; g.fillRect(0,0,ICON_SIZE,ICON_SIZE);
-  g.fillStyle='rgba(255,255,255,.15)'; g.font='bold 42px sans-serif'; g.textAlign=g.textBaseline='center';
-  g.translate(ICON_SIZE/2,ICON_SIZE/2);
-  g.fillText(String.fromCharCode(65+i),0,0);
-  icons['icon'+i]=s;
+  const buf=document.createElement('canvas');
+  buf.width=buf.height=ICON_SIZE;
+  const bctx=buf.getContext('2d');
+  bctx.fillStyle=c;
+  bctx.fillRect(0,0,ICON_SIZE,ICON_SIZE);
+  bctx.fillStyle='rgba(255,255,255,.2)';
+  bctx.font='bold 42px sans-serif';
+  bctx.textAlign='center';bctx.textBaseline='middle';
+  bctx.fillText(String.fromCharCode(65+i),ICON_SIZE/2,ICON_SIZE/2);
+  icons['icon'+i]=buf;
 });
-const iconNames = Object.keys(icons);
+const iconNames=Object.keys(icons);
 
-/**** 遊戲狀態 ****/
-let score = 0;
-let startTime = Date.now();
-let lastSwitch = Date.now();
-let playerAnswered = false;
-let flashFrame = 0;
-let requireAnswer = false;
-
+/***** 遊戲邏輯 *****/
 let currentDigit, currentIcon, prevDigit, prevIcon;
-
-/**** 更新刺激 ****/
 function newStimulus(){
-  prevDigit = currentDigit;
-  prevIcon  = currentIcon;
-
-  currentDigit = Math.random()<.2 && prevDigit!==undefined ? prevDigit : 1+Math.floor(Math.random()*9);
-  currentIcon  = Math.random()<.2 && prevIcon !==undefined ? prevIcon  : iconNames[Math.random()*iconNames.length|0];
-
-  const dSame = currentDigit===prevDigit && prevDigit!==undefined;
-  const iSame = currentIcon===prevIcon && prevIcon!==undefined;
-  requireAnswer = dSame || iSame;
-
-  flashFrame = 6; // 約 100ms 閃白
+  prevDigit=currentDigit; prevIcon=currentIcon;
+  currentDigit=Math.random()<.2&&prevDigit!==undefined?prevDigit:1+Math.floor(Math.random()*9);
+  currentIcon=Math.random()<.2&&prevIcon!==undefined?prevIcon:iconNames[Math.random()*iconNames.length|0];
+  flashUntil=Date.now()+FLASH_MS; // 產生閃光效果
 }
-
-/**** 檢查答案 ****/
 function check(type){
   if(playerAnswered) return;
-
-  const dSame = currentDigit===prevDigit && prevDigit!==undefined;
-  const iSame = currentIcon===prevIcon && prevIcon!==undefined;
-
+  const dSame=currentDigit===prevDigit&&prevDigit!==undefined;
+  const iSame=currentIcon===prevIcon&&prevIcon!==undefined;
+  let needAnswer=dSame||iSame;        // 本輪是否需要作答
   let correct=false;
-  if(type==='digit' && dSame && !iSame) correct=true;
-  else if(type==='icon' && iSame && !dSame) correct=true;
-  else if(type==='both' && dSame && iSame) correct=true;
-
-  // 若本輪兩者皆不同，任何作答都屬於誤答
-  if(!dSame && !iSame) correct=false;
-
-  score += correct ? 1 : -1;
-  document.getElementById('score').textContent=`分數: ${score}`;
-  playerAnswered = true;
-}
-
-/**** 主迴圈 ****/
-function loop(){
-  const now = Date.now();
-  const elapsed = (now - startTime) / 1000;
-  const remain  = Math.max(0, GAME_DURATION - elapsed);
-  const m = String(Math.floor(remain/60)).padStart(2,'0');
-  const s = String(Math.floor(remain%60)).padStart(2,'0');
-  document.getElementById('timer').textContent = `時間: ${m}:${s}`;
-
-  if(now - lastSwitch > SWITCH_INTERVAL){
-    // 未在需要作答的回合回答 → 扣分
-    if(!playerAnswered && requireAnswer){
-      score--;
-      document.getElementById('score').textContent=`分數: ${score}`;
-    }
-    playerAnswered=false;
-    newStimulus();
-    lastSwitch=now;
-  }
-
-  // 繪圖
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  ctx.fillStyle='#2f4f4f';
-  ctx.font='160px sans-serif';
-  ctx.textAlign='center';
-  ctx.textBaseline='middle';
-  if(currentDigit!==undefined) ctx.fillText(currentDigit, canvas.width/4, canvas.height/2);
-
-  const img = icons[currentIcon];
-  if(img) ctx.drawImage(img, canvas.width*0.65, canvas.height/2-ICON_SIZE/2, ICON_SIZE, ICON_SIZE);
-
-  if(flashFrame>0){
-    ctx.fillStyle=`rgba(255,255,255,${flashFrame/6})`;
-    ctx.fillRect(0,0,canvas.width,canvas.height);
-    flashFrame--;
-  }
-
-  if(remain>0){
-    requestAnimationFrame(loop);
+  if(type==='digit'&&dSame&&!iSame) correct=true;
+  else if(type==='icon'&&iSame&&!dSame) correct=true;
+  else if(type==='both'&&dSame&&iSame) correct=true;
+  else if(!needAnswer&&type===undefined) correct=true; // 不該作答且沒按任何鍵
+  // 評分機制：
+  if(needAnswer){
+      score+=correct?1:-1;
   }else{
-    alert(`遊戲結束！你的分數：${score}`);
+      // 不需要作答時誤按扣分
+      if(type!==undefined) score-=1;
   }
+  document.getElementById('score').textContent=`分數: ${score}`;
+  playerAnswered=true;
 }
 
-/**** 綁定按鈕與鍵盤 ****/
-document.querySelectorAll('button').forEach(btn=>{
-  btn.onclick = ()=>{
-    check(btn.dataset.type);
-    btn.classList.add('flash');
-    setTimeout(()=>btn.classList.remove('flash'),150);
-  };
-});
+/***** 主迴圈 *****/
+function loop(){
+  const now=Date.now();
+  const elapsed=(now-startTime)/1000;
+  const remain=Math.max(0,GAME_DURATION-elapsed);
+  document.getElementById('timer').textContent=`時間: ${String(Math.floor(remain/60)).padStart(2,'0')}:${String(Math.floor(remain%60)).padStart(2,'0')}`;
 
-const keyMap = { 'a':'digit', 's':'both', 'd':'icon' };
-document.addEventListener('keydown', e=>{
-  const t = keyMap[e.key.toLowerCase()];
-  if(t){
-    check(t);
-    const btn = document.querySelector(`button[data-type="${t}"]`);
-    if(btn){ btn.classList.add('flash'); setTimeout(()=>btn.classList.remove('flash'),150); }
+  // 題目切換
+  if(now-lastSwitch>=SWITCH_INTERVAL){
+      const needAnswer=(currentDigit===prevDigit&&prevDigit!==undefined)||(currentIcon===prevIcon&&prevIcon!==undefined);
+      if(needAnswer && !playerAnswered) { // 應作答未作答才扣分
+          score--; document.getElementById('score').textContent=`分數: ${score}`;
+      }
+      playerAnswered=false;
+      newStimulus();
+      lastSwitch=now;
   }
+
+  // 畫面刷新
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  // 閃光
+  if(now<flashUntil){
+      ctx.fillStyle='#ffffff';
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+  }
+  // 畫數字
+  ctx.fillStyle='#2f4f4f';
+  ctx.font='160px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+  if(currentDigit!==undefined) ctx.fillText(currentDigit,canvas.width/4,canvas.height/2);
+  // 畫 icon
+  const img=icons[currentIcon];
+  if(img) ctx.drawImage(img,canvas.width*0.65,canvas.height/2-ICON_SIZE/2,ICON_SIZE,ICON_SIZE);
+
+  if(remain>0) requestAnimationFrame(loop); else alert(`遊戲結束！你的分數：${score}`);
+}
+
+/***** 事件繫結 *****/
+document.querySelectorAll('button').forEach(b=>{
+  b.onclick=()=>check(b.dataset.type);
+});
+// 鍵盤 A/S/D
+window.addEventListener('keydown',e=>{
+  if(e.repeat) return;  // 按住不連續判定
+  const key=e.key.toLowerCase();
+  if(key==='a')      check('digit');
+  else if(key==='s') check('both');
+  else if(key==='d') check('icon');
 });
 
-/**** 啟動 ****/
+/***** 開始遊戲 *****/
 newStimulus();
 loop();
 </script>
